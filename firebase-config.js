@@ -1,4 +1,4 @@
-const firebaseConfig = {
+window.FIREBASE_CONFIG = {
   apiKey: "AIzaSyCFPSzPBNRLehV-Nb9OAC81kMc0T2pT5fc",
   authDomain: "chess-trainer-eefb7.firebaseapp.com",
   projectId: "chess-trainer-eefb7",
