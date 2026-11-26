@@ -15,7 +15,7 @@
   body { margin: 0; min-height: 100vh; display: flex; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--paper); color: var(--ink); }
 
   /* sidebar */
-  #sidebar { width: 216px; background: var(--ink); color: #b9b3a5; display: flex; flex-direction: column; padding: 26px 0 18px; flex-shrink: 0; }
+  #sidebar { width: 216px; background: var(--ink); color: #b9b3a5; display: flex; flex-direction: column; padding: 26px 0 18px; flex-shrink: 0; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
   #logo { font-family: var(--serif); font-size: 22px; color: #f1ede3; padding: 0 22px; letter-spacing: 0.3px; }
   #tag { font-size: 12px; color: #8d8879; padding: 3px 22px 24px; letter-spacing: 0.4px; border-bottom: 1px solid #333840; margin-bottom: 14px; }
   .nav-item { display: flex; align-items: center; gap: 13px; padding: 10px 22px; font-size: 15px; cursor: pointer; border-left: 3px solid transparent; }
@@ -156,6 +156,18 @@
   .mecard .rt { font-family: var(--serif); font-size: 30px; font-weight: 600; line-height: 1; }
   .seekbox { border: 1px solid var(--line); background: var(--panel); border-radius: 4px; padding: 16px 20px; max-width: 700px; }
   .plus { color: var(--good); font-weight: 700; } .minus { color: var(--bad); font-weight: 700; }
+  #frame { position: relative; }
+  #marks { position: absolute; left: 8px; top: 8px; width: 480px; height: 480px; pointer-events: none; z-index: 5; overflow: visible; }
+  .hidecoords #ranks div, .hidecoords #files div { visibility: hidden; }
+  #viewbar { display: none; align-items: center; }
+  #viewbar .small { min-width: 140px; text-align: center; }
+  .setrow2 { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+  .setrow2:last-child { border-bottom: none; }
+  .setrow2 .small { margin-top: 2px; font-size: 13px; }
+  .setblock + .setblock { margin-top: 16px; }
+  .setblock h4:first-child { margin-top: 0; }
+  .acol { width: 30px; height: 30px; border-radius: 50%; padding: 0; border: 3px solid transparent; box-shadow: 0 0 0 1px var(--line); }
+  .acol.on { border-color: var(--panel); box-shadow: 0 0 0 2px var(--ink); }
   .hintsq { box-shadow: inset 0 0 0 4px #e6c566; }
   .hang { box-shadow: inset 0 0 0 4px rgba(176,65,46,0.9); }
   .prey { box-shadow: inset 0 0 0 4px rgba(63,125,78,0.9); }
@@ -209,6 +221,7 @@
         </div>
         <div class="clock" id="clockBot"><span class="cn"></span><span class="ct"></span></div>
         <div id="status"></div>
+        <div class="btnrow" id="viewbar"><button id="vbPrev" title="Previous move (left arrow key)">‹ Back</button><span class="small" id="vbInfo"></span><button id="vbNext" title="Next move (right arrow key)">Next ›</button><button class="primary" id="vbLive">Back to the game</button></div>
         <div class="btnrow" id="ctrl"></div>
       </div>
       <div class="side" id="panel"></div>
@@ -216,7 +229,17 @@
     <div id="info"></div>
   </div>
 
-<script src="firebase-config.js"></script>
+<script>
+// Your Firebase settings are built in, so this one file is all GitHub needs.
+window.FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCFPSzPBNRLehV-Nb9OAC81kMc0T2pT5fc",
+  authDomain: "chess-trainer-eefb7.firebaseapp.com",
+  projectId: "chess-trainer-eefb7",
+  storageBucket: "chess-trainer-eefb7.firebasestorage.app",
+  messagingSenderId: "1080809695232",
+  appId: "1:1080809695232:web:a463785817a45c193c90e5"
+};
+</script>
 <script>
 // ---------- Chess engine (no page code in here) ----------
 const FILES = "abcdefgh";
@@ -894,34 +917,56 @@ function getCtx() {
   if (audioCtx.state === "suspended") audioCtx.resume();
   return audioCtx;
 }
-function knock(c, t, freq, dur, vol) {
-  const len = Math.floor(c.sampleRate * dur);
-  const buf = c.createBuffer(1, len, c.sampleRate);
-  const d = buf.getChannelData(0);
-  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+let master = null;
+let SET = { volume: 0.7, sound: "wood", legal: true, lastmove: true, coords: true, anim: true, arrow: "#15781B", confirmResign: true };
+try { const sv = JSON.parse(localStorage.getItem("settings2") || "{}"); if (sv && typeof sv === "object") Object.assign(SET, sv); } catch (e) {}
+function saveSet() { store("settings2", JSON.stringify(SET)); }
+function out(c) { if (!master) { master = c.createGain(); master.connect(c.destination); } master.gain.value = SET.volume; return master; }
+function knock(c, t, freq, dur, vol, q, pow) {
+  const len = Math.floor(c.sampleRate * dur), buf = c.createBuffer(1, len, c.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, pow || 3);
   const src = c.createBufferSource(); src.buffer = buf;
-  const f = c.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = freq; f.Q.value = 1.2;
+  const f = c.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = freq; f.Q.value = q || 1.2;
   const g = c.createGain(); g.gain.value = vol;
-  src.connect(f); f.connect(g); g.connect(c.destination);
+  src.connect(f); f.connect(g); g.connect(out(c));
   src.start(t);
 }
-function thud(c, t, freq, dur, vol) {
+function tone(c, t, f, dur, vol, type, f2) {
   const o = c.createOscillator(), g = c.createGain();
-  o.type = "sine";
-  o.frequency.setValueAtTime(freq, t);
-  o.frequency.exponentialRampToValueAtTime(freq * 0.5, t + dur);
-  g.gain.setValueAtTime(vol, t);
-  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-  o.connect(g); g.connect(c.destination);
-  o.start(t); o.stop(t + dur);
+  o.type = type || "sine";
+  o.frequency.setValueAtTime(f, t);
+  if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + dur);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(vol, t + 0.008);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(out(c));
+  o.start(t); o.stop(t + dur + 0.03);
 }
+// kinds: move, capture, check, start, end, good, bad
 function playSound(kind) {
-  if (!soundOn) return;
+  if (!soundOn || SET.volume <= 0) return;
   const c = getCtx();
   if (!c) return;
-  const t = c.currentTime;
-  if (kind === "move") { knock(c, t, 1100, 0.07, 1.0); thud(c, t, 200, 0.09, 0.5); }
-  else { knock(c, t, 1700, 0.1, 1.6); thud(c, t, 130, 0.14, 0.8); knock(c, t + 0.06, 900, 0.08, 1.0); }
+  const t = c.currentTime, st = SET.sound;
+  if (kind === "good") { [659, 784, 1047].forEach((f, i) => tone(c, t + i * 0.075, f, 0.2, 0.22)); return; }
+  if (kind === "bad") { tone(c, t, 233, 0.26, 0.28, "triangle", 155); return; }
+  if (kind === "start") { tone(c, t, 523, 0.16, 0.2); tone(c, t + 0.11, 784, 0.26, 0.2); return; }
+  if (kind === "end") { [523, 659, 784].forEach(f => tone(c, t, f, 0.7, 0.12)); tone(c, t, 262, 0.7, 0.1, "triangle"); return; }
+  if (st === "classic") {
+    if (kind === "move") { knock(c, t, 1100, 0.07, 1.0); tone(c, t, 200, 0.09, 0.5, "sine", 100); }
+    else { knock(c, t, 1700, 0.1, 1.6); tone(c, t, 130, 0.14, 0.8, "sine", 65); knock(c, t + 0.06, 900, 0.08, 1.0); }
+    return;
+  }
+  if (st === "soft") {
+    if (kind === "move") tone(c, t, 520, 0.08, 0.26, "triangle", 440);
+    else if (kind === "capture") { tone(c, t, 440, 0.1, 0.3, "triangle", 300); tone(c, t + 0.05, 262, 0.14, 0.2); }
+    else { tone(c, t, 660, 0.12, 0.24); tone(c, t + 0.09, 880, 0.18, 0.2); }
+    return;
+  }
+  // wooden (default): a short knock on a hollow board
+  if (kind === "move") { knock(c, t, 720, 0.045, 1.5, 0.9, 6); tone(c, t, 250, 0.07, 0.35, "sine", 150); }
+  else if (kind === "capture") { knock(c, t, 1050, 0.055, 1.9, 1, 6); tone(c, t, 175, 0.11, 0.5, "triangle", 105); knock(c, t + 0.04, 560, 0.05, 1.2, 0.9, 6); }
+  else { knock(c, t, 720, 0.045, 1.5, 0.9, 6); tone(c, t, 250, 0.07, 0.35, "sine", 150); tone(c, t + 0.05, 988, 0.2, 0.16); tone(c, t + 0.05, 1319, 0.26, 0.09); }
 }
 
 // ---------- Screen state ----------
@@ -938,6 +983,7 @@ for (let i = 0; i < 8; i++) {
   const fl = document.createElement("div"); $("files").appendChild(fl); fileEls.push(fl);
 }
 function drawCoords() {
+  $("wrap").classList.toggle("hidecoords", !SET.coords);
   for (let i = 0; i < 8; i++) {
     rankEls[i].textContent = flipped ? i + 1 : 8 - i;
     fileEls[i].textContent = flipped ? FILES[7 - i] : FILES[i];
@@ -1007,9 +1053,106 @@ function localFlag(col) {
 }
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
+// ---------- Board extras: arrows, looking back at earlier moves, move animation ----------
+let gameSnaps = [], viewIdx = null, marks = { arrows: [], circles: [] }, markFrom = null, markColor = "#15781B", justDropped = false;
+const VIEW_MODES = ["play", "online", "drill", "puzzle", "test"];
+const SVGNS = "http://www.w3.org/2000/svg";
+function sqCenter(r, c) { return [(flipped ? 7 - c : c) * 60 + 30, (flipped ? 7 - r : r) * 60 + 30]; }
+function squareAt(e) {
+  const rect = boardEl.getBoundingClientRect();
+  let col = Math.floor((e.clientX - rect.left - 8) / 60), row = Math.floor((e.clientY - rect.top - 8) / 60);
+  if (flipped) { col = 7 - col; row = 7 - row; }
+  return inside(row, col) ? [row, col] : null;
+}
+function onMarkUp(e) {
+  document.removeEventListener("pointerup", onMarkUp);
+  if (e.button !== 2 || !markFrom) return;
+  const to = squareAt(e), from = markFrom;
+  markFrom = null;
+  if (!to) return;
+  const same = (a, b) => a[0] === b[0] && a[1] === b[1];
+  if (same(from, to)) {
+    const i = marks.circles.findIndex(x => same(x.sq, to));
+    if (i >= 0) marks.circles.splice(i, 1); else marks.circles.push({ sq: to, color: markColor });
+  } else {
+    const i = marks.arrows.findIndex(x => same(x.from, from) && same(x.to, to));
+    if (i >= 0) marks.arrows.splice(i, 1); else marks.arrows.push({ from: from, to: to, color: markColor });
+  }
+  drawMarks();
+}
+function drawMarks() {
+  let svg = $("marks");
+  if (!svg) {
+    svg = document.createElementNS(SVGNS, "svg");
+    svg.id = "marks"; svg.setAttribute("viewBox", "0 0 480 480");
+    $("frame").appendChild(svg);
+  }
+  let h = "";
+  for (const m of marks.circles) {
+    const [x, y] = sqCenter(m.sq[0], m.sq[1]);
+    h += "<circle cx='" + x + "' cy='" + y + "' r='26' fill='none' stroke='" + m.color + "' stroke-width='5' opacity='0.85'/>";
+  }
+  for (const a of marks.arrows) {
+    const [x1, y1] = sqCenter(a.from[0], a.from[1]), [x2, y2] = sqCenter(a.to[0], a.to[1]);
+    const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy), ux = dx / len, uy = dy / len;
+    const head = 24, bx = x2 - ux * head, by = y2 - uy * head, px = -uy * 15, py = ux * 15;
+    const sx = x1 + ux * 12, sy = y1 + uy * 12;
+    h += "<g opacity='0.8' fill='" + a.color + "' stroke='" + a.color + "'><line x1='" + sx + "' y1='" + sy + "' x2='" + bx + "' y2='" + by + "' stroke-width='11' stroke-linecap='round'/>" +
+      "<polygon stroke='none' points='" + x2 + "," + y2 + " " + (bx + px) + "," + (by + py) + " " + (bx - px) + "," + (by - py) + "'/></g>";
+  }
+  svg.innerHTML = h;
+}
+boardEl.addEventListener("contextmenu", e => e.preventDefault());
+
+function resetViewHistory() { gameSnaps = [{ snap: snapshot(), lastMove: lastMove }]; viewIdx = null; updateViewbar(); }
+function viewGo(i) {
+  if (!VIEW_MODES.includes(mode) || gameSnaps.length < 2) return;
+  const liveIdx = gameSnaps.length - 1;
+  i = Math.max(0, Math.min(liveIdx, i));
+  viewIdx = i === liveIdx ? null : i;
+  selected = null; legal = [];
+  render();
+}
+function updateViewbar() {
+  const el = $("viewbar");
+  if (!el) return;
+  const on = VIEW_MODES.includes(mode) && gameSnaps.length > 1 && $("stage").style.display !== "none";
+  el.style.display = on ? "flex" : "none";
+  if (!on) return;
+  const liveIdx = gameSnaps.length - 1, at = viewIdx === null ? liveIdx : viewIdx;
+  $("vbInfo").textContent = viewIdx === null ? "Look back at earlier moves" : "Move " + at + " of " + liveIdx + " (looking back)";
+  $("vbPrev").disabled = at === 0;
+  $("vbNext").disabled = viewIdx === null;
+  $("vbLive").style.display = viewIdx === null ? "none" : "";
+}
+$("vbPrev").onclick = () => viewGo((viewIdx === null ? gameSnaps.length - 1 : viewIdx) - 1);
+$("vbNext").onclick = () => viewGo((viewIdx === null ? gameSnaps.length - 1 : viewIdx) + 1);
+$("vbLive").onclick = () => viewGo(gameSnaps.length - 1);
+document.addEventListener("keydown", e => {
+  if (!VIEW_MODES.includes(mode) || /INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
+  const at = viewIdx === null ? gameSnaps.length - 1 : viewIdx;
+  if (e.key === "ArrowLeft") { viewGo(at - 1); e.preventDefault(); }
+  if (e.key === "ArrowRight") { viewGo(at + 1); e.preventDefault(); }
+});
+
+const reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+function animatePiece(m) {
+  if (reduceMotion) return;
+  const idx = (flipped ? 7 - m.tr : m.tr) * 8 + (flipped ? 7 - m.tc : m.tc);
+  const pc = boardEl.children[idx] && boardEl.children[idx].querySelector(".pc");
+  if (!pc) return;
+  const [fx, fy] = sqCenter(m.fr, m.fc), [tx, ty] = sqCenter(m.tr, m.tc);
+  pc.style.transition = "none";
+  pc.style.transform = "translate(" + (fx - tx) + "px," + (fy - ty) + "px)";
+  pc.style.zIndex = "4";
+  pc.getBoundingClientRect();
+  pc.style.transition = "transform 150ms ease-out";
+  pc.style.transform = "";
+}
+
 // ---------- Drawing the board ----------
 function canPlayerMove() {
-  if (gameOver || busy) return false;
+  if (gameOver || busy || viewIdx !== null) return false;
   if (mode === "play") return opp === "friend" || turn === humanColor;
   if (mode === "online") return !!(ON.g && ON.g.status === "active" && turn === ON.color);
   if (mode === "analysis") return true;
@@ -1017,6 +1160,13 @@ function canPlayerMove() {
   return mode === "puzzle" || mode === "test";
 }
 function render() {
+  let live = null;
+  if (viewIdx !== null && gameSnaps[viewIdx]) {
+    live = { snap: snapshot(), lastMove: lastMove, checkSq: checkSq };
+    restore(gameSnaps[viewIdx].snap);
+    lastMove = gameSnaps[viewIdx].lastMove;
+    checkSq = statusNow().check ? findKing(board, turn) : null;
+  }
   drawCoords();
   boardEl.innerHTML = "";
   for (let i = 0; i < 8; i++) {
@@ -1024,7 +1174,7 @@ function render() {
       const r = flipped ? 7 - i : i, c = flipped ? 7 - j : j;
       const sq = document.createElement("div");
       sq.className = "square " + ((r + c) % 2 === 0 ? "light" : "dark");
-      if (lastMove && ((lastMove.fr === r && lastMove.fc === c) || (lastMove.tr === r && lastMove.tc === c))) sq.classList.add("lastmove");
+      if (SET.lastmove && lastMove && ((lastMove.fr === r && lastMove.fc === c) || (lastMove.tr === r && lastMove.tc === c))) sq.classList.add("lastmove");
       if (checkSq && checkSq[0] === r && checkSq[1] === c) sq.classList.add("incheck");
       if (selected && selected[0] === r && selected[1] === c) sq.classList.add("selected");
       if (dragFrom && dragFrom[0] === r && dragFrom[1] === c) sq.classList.add("ghost");
@@ -1035,7 +1185,7 @@ function render() {
       }
       if (co && co.flash && co.flash.r === r && co.flash.c === c && performance.now() < co.flash.until) sq.classList.add(co.flash.ok ? "hitok" : "hitbad");
       const mv = legal.find(m => m.tr === r && m.tc === c);
-      if (mv) sq.classList.add(board[r][c] !== "." || mv.ep ? "capture" : "dot");
+      if (mv && SET.legal) sq.classList.add(board[r][c] !== "." || mv.ep ? "capture" : "dot");
       const letter = board[r][c];
       if (letter !== ".") {
         const white = letter === letter.toUpperCase(), type = letter.toLowerCase();
@@ -1050,6 +1200,8 @@ function render() {
       boardEl.appendChild(sq);
     }
   }
+  if (live) { restore(live.snap); lastMove = live.lastMove; checkSq = live.checkSq; }
+  drawMarks(); updateViewbar();
 }
 
 // ---------- Moving pieces (click or drag) ----------
@@ -1068,18 +1220,22 @@ function doMove(m, quiet) {
   hintMove = null; hintFull = false;
   lastMove = { fr: m.fr, fc: m.fc, tr: m.tr, tc: m.tc };
   makeMove(m);
+  gameSnaps.push({ snap: snapshot(), lastMove: lastMove }); viewIdx = null;
+  marks = { arrows: [], circles: [] };
   if (mode === "play") clockAfterMove(mover);
   selected = null; legal = [];
-  if (!quiet) playSound(cap ? "capture" : "move");
   const st = statusNow();
+  if (!quiet) playSound(st.over ? "end" : st.check ? "check" : cap ? "capture" : "move");
   checkSq = st.check ? findKing(board, turn) : null;
   moveHistory.push(san + (st.mate ? "#" : st.check ? "+" : ""));
   if (mode === "play") playStatus(st);
   render();
+  if (SET.anim && !quiet && !justDropped) animatePiece(m);
   renderMoveList();
 }
 function onClick(r, c) {
   if (mode === "coords") { coordClick(r, c); return; }
+  if (viewIdx !== null) { viewGo(gameSnaps.length - 1); return; }
   if (suppressClick || !canPlayerMove()) return;
   if (selected) {
     const m = legal.find(m => m.tr === r && m.tc === c);
@@ -1092,6 +1248,14 @@ function onClick(r, c) {
   render();
 }
 function onDown(e, r, c) {
+  if (e.button === 2) {
+    e.preventDefault();
+    markFrom = [r, c];
+    markColor = e.shiftKey ? "#c8382a" : e.altKey ? "#2f6fd6" : e.ctrlKey ? "#e68a00" : SET.arrow;
+    document.addEventListener("pointerup", onMarkUp);
+    return;
+  }
+  if (e.button === 0 && (marks.arrows.length || marks.circles.length)) { marks = { arrows: [], circles: [] }; drawMarks(); }
   if (e.button > 0 || !canPlayerMove()) return;
   const p = board[r][c];
   if (p === "." || colorOf(p) !== turn) return;
@@ -1136,7 +1300,7 @@ function onUp(e) {
   let col = Math.floor((e.clientX - rect.left - 8) / 60), row = Math.floor((e.clientY - rect.top - 8) / 60);
   if (flipped) { col = 7 - col; row = 7 - row; }
   const m = inside(row, col) && e.type !== "pointercancel" ? legal.find(m => m.tr === row && m.tc === col) : null;
-  if (m) { tryMove(m); return; }
+  if (m) { justDropped = true; try { tryMove(m); } finally { justDropped = false; } return; }
   selected = null; legal = [];
   render();
 }
@@ -1216,6 +1380,7 @@ function startPlay() {
       names: opp === "ai" ? (humanColor === "w" ? { w: "You", b: comp } : { w: comp, b: "You" }) : { w: "White", b: "Black" } });
   }
   playStatus(statusNow());
+  resetViewHistory();
   render(); renderMoveList(); maybeAi();
 }
 function playPage() {
@@ -1282,6 +1447,7 @@ function startPuz(def) {
   lastMove = null; moveHistory = []; selected = null; legal = [];
   gameOver = false; busy = false; checkSq = null; flipped = false; mode = "puzzle";
   statusEl.textContent = "Your move.";
+  resetViewHistory();
   render(); (pz.panel || puzPanel)();
 }
 function puzMove(m) {
@@ -1292,6 +1458,7 @@ function puzMove(m) {
   const chosen = pz.line ? (s === pz.line[pz.step] ? pz.line : null) : (pz.lines.find(l => l[0] === s) || null);
   if (!chosen && !mate) {
     if (pz.onWrong) { pz.onWrong(); return; }
+    playSound("bad");
     statusEl.textContent = "Not quite. Try again.";
     selected = null; legal = [];
     render();
@@ -1314,6 +1481,7 @@ function puzMove(m) {
 }
 function puzSolved() {
   gameOver = true;
+  playSound("good");
   if (pz.onSolved) { render(); pz.onSolved(); return; }
   solved.add(pz.key); saveSolved();
   render(); puzPanel();
@@ -1500,6 +1668,7 @@ function startTest(oi, vi) {
     statusEl.textContent = "Hint: move the piece on " + moveStr(m).slice(0, 2) + ".";
   };
   statusEl.textContent = "Your move.";
+  resetViewHistory();
   updateTestBar(); render();
   if (o.side === "b") compReply();
 }
@@ -1523,6 +1692,7 @@ function testMove(m) {
   const want = tst.toks[tst.idx].replace(/[+#]/g, "");
   if (sanOf(m) !== want) {
     tst.mistakes++;
+    playSound("bad");
     statusEl.textContent = "Not quite. That isn’t the move from this variation. Try again.";
     selected = null; legal = [];
     updateTestBar(); render();
@@ -1537,6 +1707,7 @@ function testMove(m) {
 }
 function passTest() {
   gameOver = true;
+  playSound("good");
   solved.add("ot-" + tst.oi + "-" + tst.vi); saveSolved();
   statusEl.textContent = tst.mistakes ? "✓ Test passed with " + tst.mistakes + " mistake" + (tst.mistakes > 1 ? "s" : "") + "." : "✓ Perfect! Test passed with no mistakes.";
   const o = OPENINGS[tst.oi], nextVi = tst.vi + 1 < o.vars.length ? tst.vi + 1 : -1;
@@ -1729,15 +1900,47 @@ function settingsPage() {
     : "<span class='small'>None saved yet. Pick colors, then press the save button.</span>";
   let prev = "";
   for (let i = 0; i < 16; i++) prev += "<div style='background:var(--" + ((Math.floor(i / 8) + i) % 2 ? "dark" : "light") + ")'></div>";
-  infoEl.innerHTML = "<h1>Settings</h1><div class='setrow'><span>Sound effects</span><button id='soundBtn'></button></div>" +
+  const tog = (k, label, desc) => "<div class='setrow2'><div><b>" + label + "</b><div class='small'>" + desc + "</div></div><button class='chip setT" + (SET[k] ? " on" : "") + "' data-k='" + k + "'>" + (SET[k] ? "On" : "Off") + "</button></div>";
+  const ACOLS = [["#15781B", "Green"], ["#e68a00", "Orange"], ["#c8382a", "Red"], ["#2f6fd6", "Blue"]];
+  infoEl.innerHTML = "<h1>Settings</h1>" +
+    "<div class='setblock'><h4>Sound</h4>" +
+    "<div class='setrow2'><div><b>Sound effects</b></div><button class='chip' id='soundBtn'></button></div>" +
+    "<div class='setrow2'><div><b>Volume</b></div><input type='range' id='volIn' min='0' max='1' step='0.05' value='" + SET.volume + "' style='width:190px'></div>" +
+    "<div class='setrow2'><div><b>Sound style</b><div class='small'>Click one to hear it.</div></div><div class='chips' style='margin:0'>" +
+    [["wood", "Wooden"], ["soft", "Soft"], ["classic", "Classic"]].map(x => "<button class='chip sndS" + (SET.sound === x[0] ? " on" : "") + "' data-s='" + x[0] + "'>" + x[1] + "</button>").join("") + "</div></div></div>" +
+    "<div class='setblock'><h4>Board</h4>" +
+    tog("coords", "Show coordinates", "Letters and numbers around the board.") +
+    tog("lastmove", "Highlight the last move", "Shades the squares the last move came from and went to.") +
+    tog("legal", "Show legal moves", "Dots on the squares a selected piece can go to.") +
+    tog("anim", "Animate moves", "Pieces slide to their new square.") +
+    "<div class='setrow2'><div><b>Arrow color</b><div class='small'>Right-click and drag to draw an arrow, right-click a square to circle it, left-click to clear. Hold Shift for red, Ctrl for orange or Alt for blue.</div></div><div class='swatches' style='margin:0;flex-wrap:nowrap'>" +
+    ACOLS.map(x => "<button class='acol" + (SET.arrow === x[0] ? " on" : "") + "' title='" + x[1] + "' data-c='" + x[0] + "' style='background:" + x[0] + "'></button>").join("") + "</div></div></div>" +
+    "<div class='setblock'><h4>Games</h4>" +
+    tog("confirmResign", "Confirm before resigning", "In online games, Resign needs a second click so you can’t resign by accident.") + "</div>" +
     "<div class='setblock'>Board color<h4>Built-in colors</h4><div class='swatches'>" + builtin + "</div><h4>Make your own</h4>" +
     "<div class='custom'>Dark squares: <input type='color' id='darkColor' value='" + boardDark + "'></div>" +
     "<div class='custom'>Light squares: <input type='color' id='lightColor' value='" + boardLight + "'></div>" +
-    "<button id='savePreset'>Save these colors as a preset</button><h4>My presets</h4><div class='swatches'>" + mine + "</div><div class='prev'>" + prev + "</div></div>";
+    "<button id='savePreset'>Save these colors as a preset</button><h4>My presets</h4><div class='swatches'>" + mine + "</div><div class='prev'>" + prev + "</div></div>" +
+    "<div class='setblock'><h4>Progress</h4><div class='setrow2'><div><b>Reset my progress</b><div class='small'>Clears solved puzzles, passed tests, drills, best scores and your streak on this device. Online rating and past games stay.</div></div><button class='chip' id='resetBtn'>Reset</button></div></div>";
   const btn = $("soundBtn");
-  const label = () => { btn.textContent = soundOn ? "On" : "Off"; };
+  const label = () => { btn.textContent = soundOn ? "On" : "Off"; btn.classList.toggle("on", soundOn); };
   label();
   btn.onclick = () => { soundOn = !soundOn; store("soundOn", soundOn ? "on" : "off"); label(); playSound("move"); };
+  $("volIn").oninput = e => { SET.volume = +e.target.value; saveSet(); };
+  $("volIn").onchange = () => playSound("move");
+  infoEl.querySelectorAll(".sndS").forEach(b => b.onclick = () => {
+    SET.sound = b.dataset.s; saveSet();
+    infoEl.querySelectorAll(".sndS").forEach(x => x.classList.toggle("on", x === b));
+    playSound("move"); setTimeout(() => playSound("capture"), 350); setTimeout(() => playSound("check"), 750);
+  });
+  infoEl.querySelectorAll(".setT").forEach(b => b.onclick = () => { SET[b.dataset.k] = !SET[b.dataset.k]; saveSet(); settingsPage(); });
+  infoEl.querySelectorAll(".acol").forEach(b => b.onclick = () => { SET.arrow = b.dataset.c; saveSet(); settingsPage(); });
+  $("resetBtn").onclick = () => {
+    const r = $("resetBtn");
+    if (!r.dataset.sure) { r.dataset.sure = "1"; r.textContent = "Click again to reset"; setTimeout(() => { if (r.isConnected) { delete r.dataset.sure; r.textContent = "Reset"; } }, 3000); return; }
+    solved.clear(); saveSolved(); store("bests1", "{}"); store("days1", "[]");
+    r.textContent = "Progress reset"; r.disabled = true;
+  };
   infoEl.querySelectorAll(".sw").forEach(b => b.onclick = () => { applyColors(b.dataset.d, b.dataset.l); settingsPage(); });
   infoEl.querySelectorAll(".del").forEach(b => b.onclick = () => { myPresets.splice(+b.dataset.i, 1); store("myPresets", JSON.stringify(myPresets)); settingsPage(); });
   $("darkColor").onchange = e => { applyColors(e.target.value, boardLight); settingsPage(); };
@@ -1847,6 +2050,7 @@ function takeback() {
   n = Math.min(n, playLog.length);
   let e = null;
   for (let i = 0; i < n; i++) { e = playLog.pop(); moveHistory.pop(); }
+  gameSnaps.length = Math.max(1, gameSnaps.length - n); viewIdx = null;
   restore(e.snap); lastMove = e.lastMove;
   checkSq = statusNow().check ? findKing(board, turn) : null;
   gameOver = false; selected = null; legal = []; hintMove = null;
@@ -2057,7 +2261,7 @@ function coordClick(r, c) {
   if (ok) co.score++; else co.miss++;
   co.flash = { r: r, c: c, ok: ok, until: performance.now() + 250 };
   $("coS").textContent = co.score; $("coM").textContent = co.miss;
-  playSound(ok ? "move" : "capture");
+  playSound(ok ? "move" : "bad");
   coNext(); render();
 }
 function coTick() {
@@ -2123,7 +2327,7 @@ function rushHud() {
 function rushTick() { if (!rush) return; rushHud(); if (rush.running && rush.end - performance.now() <= 0) rushFinish("Time’s up!"); }
 function rushWrong() {
   rush.strikes++; rushHud();
-  playSound("capture");
+  playSound("bad");
   busy = true; selected = null; legal = [];
   const solution = (pz.line || pz.lines[0])[pz.step];
   statusEl.textContent = "✗ Not that one. The answer started with the piece on " + solution.slice(0, 2) + ".";
@@ -2175,6 +2379,7 @@ function drillStart(i) {
     const m = bestOf(scoreRoots(3, 900));
     if (m) { hintMove = { fr: m.fr, fc: m.fc, tr: m.tr, tc: m.tc }; hintFull = true; statusEl.textContent = "Hint: " + sanOf(m) + "."; render(); }
   };
+  resetViewHistory();
   drillHud();
   statusEl.textContent = "White to move.";
   render();
@@ -2186,7 +2391,7 @@ function drillHud() {
 }
 function drillEnd(win, msg) {
   gameOver = true; busy = false;
-  if (win) { solved.add("eg-" + dr.i); saveSolved(); }
+  if (win) { solved.add("eg-" + dr.i); saveSolved(); playSound("good"); } else playSound("bad");
   statusEl.textContent = (win ? "✓ " : "✗ ") + msg;
   $("drMsg").innerHTML = "<div class='fb'><b class='" + (win ? "Best" : "Blunder") + "'>" + (win ? "Well done!" : "Not this time.") + "</b> " + esc(msg) + "</div>" +
     (win && dr.i + 1 < DRILLS.length ? "<button class='primary wide' id='drNext'>Next drill: " + DRILLS[dr.i + 1].name + "</button>" : "<button class='primary wide' id='drAgain'>Try again</button>");
@@ -2391,7 +2596,7 @@ function watchShared() {
     const mine = ON.players.find(p => p.id === ON.uid);
     if (mine && ON.me && !ON.ratingBusy.size) ON.me = Object.assign({}, mine);
     if (currentView === "leaderboard") leaderboardPage();
-    if (currentView === "online" && mode !== "online") { if (!$("renForm")) drawMeCard(); drawSeeks(); }
+    if (currentView === "online" && mode !== "online") { drawMeCard(); drawSeeks(); }
   }, () => {});
   ON.db.collection("scores").limit(500).onSnapshot(snap => {
     ON.scores = snap.docs.map(d => Object.assign({ id: d.id }, d.data())).filter(x => x.name);
@@ -2555,6 +2760,8 @@ function enterGame(gid, claimer) {
   mode = "online"; boardView(true);
   setStart(); moveHistory = []; lastMove = null; selected = null; legal = []; checkSq = null;
   gameOver = false; busy = false;
+  resetViewHistory();
+  playSound("start");
   statusEl.textContent = "Connecting to the game...";
   panelEl.innerHTML = "<h2>Online game</h2><div class='small' id='onTc'></div><div class='players' id='onPlayers'></div>" +
     "<div id='onMsg'></div><div class='lbl'>Moves</div><div class='movelist' id='movelist'></div>" +
@@ -2562,7 +2769,16 @@ function enterGame(gid, claimer) {
   ctrlEl.innerHTML = "<button id='onResign'>Resign</button><button id='onDraw'>Offer draw</button><button id='onAbort'>Abort</button><button id='onFlip'>Flip board</button>";
   $("onBack").onclick = () => show("online");
   $("onFlip").onclick = () => { flipped = !flipped; render(); drawClocks(); };
-  $("onResign").onclick = () => { const g = ON.g; if (g && g.status === "active" && g.moves.length >= 2) writeGame({ status: "over", result: ON.color === "w" ? "0-1" : "1-0", reason: "resign" }); };
+  $("onResign").onclick = () => {
+    const g = ON.g, b = $("onResign");
+    if (!(g && g.status === "active" && g.moves.length >= 2)) return;
+    if (SET.confirmResign && !b.dataset.sure) {
+      b.dataset.sure = "1"; b.textContent = "Click again to resign";
+      setTimeout(() => { delete b.dataset.sure; b.textContent = "Resign"; }, 3000);
+      return;
+    }
+    writeGame({ status: "over", result: ON.color === "w" ? "0-1" : "1-0", reason: "resign" });
+  };
   $("onDraw").onclick = () => { const g = ON.g; if (g && g.status === "active" && g.drawOffer !== ON.color) writeGame({ drawOffer: ON.color }); };
   $("onAbort").onclick = () => { const g = ON.g; if (g && g.status !== "over" && g.moves.length < 2) writeGame({ status: "over", result: "", reason: "abort" }); };
   render();
@@ -2590,8 +2806,8 @@ function onGameSnap(s) {
       moveHistory[moveHistory.length - 1] = mv[i];
     }
   } else if (!prefix) {
-    setStart(); moveHistory = []; lastMove = null;
-    for (const x of mv) { const m = moveFromSan(x); if (!m) break; lastMove = { fr: m.fr, fc: m.fc, tr: m.tr, tc: m.tc }; makeMove(m); moveHistory.push(x); }
+    setStart(); moveHistory = []; lastMove = null; resetViewHistory();
+    for (const x of mv) { const m = moveFromSan(x); if (!m) break; lastMove = { fr: m.fr, fc: m.fc, tr: m.tr, tc: m.tc }; makeMove(m); moveHistory.push(x); gameSnaps.push({ snap: snapshot(), lastMove: lastMove }); }
     const st = statusNow(); checkSq = st.check ? findKing(board, turn) : null;
     renderMoveList();
   }
@@ -2735,13 +2951,7 @@ function drawMeCard() {
   const m = ON.me, rank = ON.players.findIndex(p => p.id === ON.uid) + 1, e = m.elo;
   el.innerHTML = "<div class='mecard'><div><b style='font-family:var(--serif);font-size:20px'>" + esc(m.name) + "</b>" +
     "<div class='small'>" + esc(m.wins || 0) + " wins · " + esc(m.losses || 0) + " losses · " + esc(m.draws || 0) + " draws" + (rank ? " · #" + rank + " on the leaderboard" : "") +
-    " · <a href='#' id='renameBtn' style='color:inherit'>change name</a></div></div><div style='text-align:right'><div class='rt'>" + esc(e) + "</div><div class='small'>Elo</div></div></div>";
-  $("renameBtn").onclick = ev => {
-    ev.preventDefault();
-    el.innerHTML = "<div class='mecard'><form class='namebox' id='renForm'><input id='renIn' maxlength='16' value='" + esc(m.name) + "'><button class='primary'>Save</button><button type='button' id='renX'>Cancel</button></form><div class='err' id='renErr'></div></div>";
-    $("renX").onclick = drawMeCard;
-    $("renForm").onsubmit = async x => { x.preventDefault(); try { const err = await registerName($("renIn").value); if (err) $("renErr").textContent = err; else drawMeCard(); } catch (y) { $("renErr").textContent = "Couldn't save that."; } };
-  };
+    "</div></div><div style='text-align:right'><div class='rt'>" + esc(e) + "</div><div class='small'>Elo</div></div></div>";
   const ex = $("eloEx");
   if (ex) ex.innerHTML = [["Beat someone 200 higher", e + 200, 1], ["Beat someone at your level", e, 1], ["Beat someone 200 lower", e - 200, 1],
     ["Lose to someone 200 lower", e - 200, 0], ["Lose to someone at your level", e, 0], ["Draw someone 200 higher", e + 200, 0.5]]
@@ -2805,6 +3015,7 @@ function show(view) {
   autosaveIfNeeded();
   if (mode === "online") leaveGameWatch();
   stopTraining();
+  viewIdx = null; gameSnaps = []; marks = { arrows: [], circles: [] };
   currentView = view;
   document.querySelectorAll(".nav-item").forEach(n => n.classList.toggle("active", n.dataset.view === view));
   if (view === "puzzles") sectionPuzzle(secIdx, pIdx);
